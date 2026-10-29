@@ -1,0 +1,518 @@
+--// BLACK ARROW: PAINEL DE RP (LocalScript único)
+--// Local: StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+------------------------------------------------------------------
+-- DADOS: categorias e ações (textos exatamente como especificado)
+------------------------------------------------------------------
+local FALA_PREFIX = "———``"
+
+local CATEGORIES = {
+	{
+		name = "Flechas",
+		items = {
+			{ label = "Flecha comum", text = ". Disparo uma flecha em direção a [alvo] .", target = true },
+			{ label = "Flecha explosiva", text = ". Disparo uma flecha explosiva contra [alvo] .", target = true },
+			{ label = "Flecha elétrica", text = ". Disparo uma flecha elétrica contra [alvo] .", target = true },
+			{ label = "Flecha de rede", text = ". Disparo uma flecha de rede para imobilizar [alvo] .", target = true },
+			{ label = "Flecha tranquilizante", text = ". Disparo uma flecha tranquilizante contra [alvo] .", target = true },
+		},
+	},
+	{
+		name = "Poderes Espaciais",
+		items = {
+			{ label = "Teleporte ofensivo", text = ". Teleporto para trás de [alvo] e disparo uma flecha .", target = true },
+			{ label = "Flecha por portal", text = ". Abro um portal espacial e disparo uma flecha contra [alvo] .", target = true },
+			{ label = "Troca espacial", text = ". Troco de posição com [alvo] usando manipulação espacial .", target = true },
+			{ label = "Onda espacial", text = ". Libero uma onda espacial que derruba [alvo] .", target = true },
+		},
+	},
+	{
+		name = "Combos",
+		items = {
+			{ label = "Combo espacial", text = ". Teleporto para perto de [alvo] e disparo uma flecha .", target = true },
+			{ label = "Rajada espacial", text = ". Abro portais ao redor de [alvo] e disparo uma rajada de flechas através deles, atacando de várias direções .", target = true },
+			{ label = "Combo elétrico", text = ". Disparo uma flecha elétrica e em seguida uma flecha de rede contra [alvo] .", target = true },
+		},
+	},
+	{
+		name = "Finalizações",
+		items = {
+			{ label = "Flecha Espacial Suprema", text = ". Disparo uma flecha carregada de energia espacial contra [alvo] .", target = true },
+			{ label = "Tempestade de Flechas", text = ". Abro vários portais espaciais ao redor de [alvo] e disparo flechas através deles, atacando de várias direções .", target = true },
+			{ label = "Colapso Espacial", text = ". Crio uma distorção espacial poderosa que derruba [alvo] .", target = true },
+			{ label = "Disparo Absoluto", text = ". Concentro minha energia espacial em uma flecha e disparo contra [alvo] .", target = true },
+		},
+	},
+	{
+		name = "Falas",
+		items = {
+			{ label = "Ameaça", text = FALA_PREFIX .. "Você não faz ideia de com quem está mexendo." },
+			{ label = "Intimidação", text = FALA_PREFIX .. "Ajoelhe-se e talvez eu tenha piedade." },
+			{ label = "Aviso", text = FALA_PREFIX .. "Esta é sua última chance de se render." },
+			{ label = "Provocação", text = FALA_PREFIX .. "Vamos ver se você é tão bom quanto dizem." },
+			{ label = "Confiança", text = FALA_PREFIX .. "Você já perdeu. Só ainda não percebeu." },
+			{ label = "Silêncio", text = FALA_PREFIX .. "Falar é perda de tempo." },
+			{ label = "Justiça", text = FALA_PREFIX .. "A justiça não precisa da sua permissão." },
+			{ label = "Oliver", text = FALA_PREFIX .. "Oliver oferece esperança. Eu ofereço medo." },
+			{ label = "Rendição", text = FALA_PREFIX .. "Acabou. Largue suas armas." },
+			{ label = "Despedida", text = FALA_PREFIX .. "Da próxima vez, não terei tanta paciência." },
+		},
+	},
+}
+
+------------------------------------------------------------------
+-- TEMA
+------------------------------------------------------------------
+local THEME = {
+	bg = Color3.fromRGB(0, 0, 0),
+	panel = Color3.fromRGB(10, 13, 11),
+	card = Color3.fromRGB(18, 27, 21),
+	stroke = Color3.fromRGB(28, 100, 55),
+	accent = Color3.fromRGB(46, 160, 90),
+	text = Color3.fromRGB(255, 255, 255),
+	dim = Color3.fromRGB(150, 185, 163),
+	danger = Color3.fromRGB(190, 65, 65),
+}
+
+local PANEL_W, PANEL_H = 250, 330
+local MAX_CHAT_LENGTH = 200
+local MAX_NAME_LENGTH = 30
+
+------------------------------------------------------------------
+-- UTILITÁRIOS
+------------------------------------------------------------------
+local function new(class, props, children)
+	local inst = Instance.new(class)
+	for k, v in pairs(props or {}) do
+		if k ~= "Parent" then inst[k] = v end
+	end
+	for _, c in ipairs(children or {}) do c.Parent = inst end
+	if props and props.Parent then inst.Parent = props.Parent end
+	return inst
+end
+
+local function round(radius)
+	return new("UICorner", { CornerRadius = UDim.new(0, radius) })
+end
+
+local function stroke(color, thickness)
+	return new("UIStroke", { Color = color or THEME.stroke, Thickness = thickness or 1 })
+end
+
+-- Remove espaços extras, quebras de linha e limita o tamanho do nome.
+local function cleanName(raw)
+	local name = tostring(raw or ""):gsub("[\r\n\t]", " ")
+	name = name:match("^%s*(.-)%s*$") or ""
+	if utf8.len(name) and utf8.len(name) > MAX_NAME_LENGTH then
+		name = name:sub(1, utf8.offset(name, MAX_NAME_LENGTH + 1) - 1)
+	end
+	return name
+end
+
+-- Troca [alvo] pelo nome (escapando % para não quebrar o gsub).
+local function buildMessage(template, name)
+	local safe = name:gsub("%%", "%%%%")
+	local msg = template:gsub("%[alvo%]", safe)
+	return msg
+end
+
+------------------------------------------------------------------
+-- ENVIO PARA O CHAT
+------------------------------------------------------------------
+-- Retorna true somente se o chat aceitou a mensagem; senão false + motivo.
+local function sendChatMessage(message)
+	-- Sistema novo (TextChatService)
+	if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+		local channels = TextChatService:FindFirstChild("TextChannels")
+		local general = channels and channels:FindFirstChild("RBXGeneral")
+		if not general then
+			return false, "Canal de chat não encontrado."
+		end
+		local okCan, canChat = pcall(function()
+			return TextChatService:CanUserChatAsync(player.UserId)
+		end)
+		if okCan and canChat == false then
+			return false, "Sua conta não pode usar o chat."
+		end
+		local ok, err = pcall(function()
+			general:SendAsync(message)
+		end)
+		if ok then return true end
+		return false, "O chat recusou o envio."
+	end
+
+	-- Sistema antigo (Legacy Chat)
+	local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+	local sayEvent = events and events:FindFirstChild("SayMessageRequest")
+	if sayEvent then
+		local ok = pcall(function()
+			sayEvent:FireServer(message, "All")
+		end)
+		if ok then return true end
+		return false, "Falha ao enviar pelo chat antigo."
+	end
+
+	return false, "Esta experiência não permite enviar mensagens pelo LocalScript."
+end
+
+------------------------------------------------------------------
+-- INTERFACE BASE
+------------------------------------------------------------------
+local gui = new("ScreenGui", {
+	Name = "BlackArrowRP", ResetOnSpawn = false, DisplayOrder = 30,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling, Parent = playerGui,
+})
+
+-- Botão flutuante
+local floatBtn = new("TextButton", {
+	Name = "BotaoFlutuante", Size = UDim2.fromOffset(46, 46), Position = UDim2.new(0, 10, 0.45, 0),
+	BackgroundColor3 = THEME.bg, AutoButtonColor = false, Text = "BA",
+	Font = Enum.Font.GothamBlack, TextSize = 16, TextColor3 = THEME.text, ZIndex = 5, Parent = gui,
+}, { round(23), stroke(THEME.accent, 2) })
+
+-- Painel principal
+local panel = new("Frame", {
+	Name = "Painel", Visible = false, Size = UDim2.fromOffset(PANEL_W, PANEL_H),
+	AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 10),
+	BackgroundColor3 = THEME.panel, BorderSizePixel = 0, ZIndex = 2, Parent = gui,
+}, { round(10), stroke(THEME.stroke, 1.5) })
+local uiScale = new("UIScale", { Parent = panel })
+
+local header = new("Frame", {
+	Name = "Cabecalho", Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = THEME.bg,
+	BorderSizePixel = 0, ZIndex = 3, Parent = panel,
+}, { round(10) })
+
+local backBtn = new("TextButton", {
+	Name = "Voltar", Visible = false, Size = UDim2.fromOffset(40, 24), Position = UDim2.fromOffset(5, 4),
+	BackgroundColor3 = THEME.card, AutoButtonColor = true, Text = "<",
+	Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = THEME.text, ZIndex = 4, Parent = header,
+}, { round(6), stroke(THEME.stroke, 1) })
+
+local titleLabel = new("TextLabel", {
+	Name = "Titulo", Size = UDim2.new(1, -96, 1, 0), Position = UDim2.fromOffset(48, 0),
+	BackgroundTransparency = 1, Text = "BLACK ARROW", Font = Enum.Font.GothamBlack, TextSize = 14,
+	TextColor3 = THEME.text, TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 4, Parent = header,
+})
+
+local closeBtn = new("TextButton", {
+	Name = "Fechar", Size = UDim2.fromOffset(34, 24), Position = UDim2.new(1, -39, 0, 4),
+	BackgroundColor3 = THEME.card, AutoButtonColor = true, Text = "X",
+	Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = THEME.text, ZIndex = 4, Parent = header,
+}, { round(6), stroke(THEME.stroke, 1) })
+
+local content = new("ScrollingFrame", {
+	Name = "Conteudo", Size = UDim2.new(1, -12, 1, -66), Position = UDim2.fromOffset(6, 38),
+	BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
+	ScrollBarImageColor3 = THEME.accent, CanvasSize = UDim2.new(0, 0, 0, 0),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y, ZIndex = 3, Parent = panel,
+}, {
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }),
+	new("UIPadding", { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 4) }),
+})
+
+local statusLabel = new("TextLabel", {
+	Name = "Status", Size = UDim2.new(1, -12, 0, 22), Position = UDim2.new(0, 6, 1, -26),
+	BackgroundTransparency = 1, Text = "", Font = Enum.Font.Gotham, TextSize = 11,
+	TextColor3 = THEME.dim, TextWrapped = true, ZIndex = 3, Parent = panel,
+})
+
+local statusToken = 0
+local function setStatus(text, good)
+	statusToken += 1
+	local mine = statusToken
+	statusLabel.Text = text
+	statusLabel.TextColor3 = good and THEME.accent or THEME.danger
+	task.delay(4, function()
+		if statusToken == mine then statusLabel.Text = "" end
+	end)
+end
+
+------------------------------------------------------------------
+-- BOTÕES DE LISTA
+------------------------------------------------------------------
+local function clearContent()
+	for _, child in ipairs(content:GetChildren()) do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+	content.CanvasPosition = Vector2.zero
+end
+
+local function makeListButton(label, order, subtitle, onClick)
+	local btn = new("TextButton", {
+		Name = "Item", LayoutOrder = order, Size = UDim2.new(1, 0, 0, subtitle and 46 or 40),
+		BackgroundColor3 = THEME.card, AutoButtonColor = true, Text = "",
+		BorderSizePixel = 0, ZIndex = 4, Parent = content,
+	}, { round(8), stroke(THEME.stroke, 1) })
+	new("TextLabel", {
+		Size = UDim2.new(1, -14, 0, subtitle and 22 or 40), Position = UDim2.fromOffset(8, subtitle and 4 or 0),
+		BackgroundTransparency = 1, Text = label, Font = Enum.Font.GothamBold, TextSize = 13,
+		TextColor3 = THEME.text, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 5, Parent = btn,
+	})
+	if subtitle then
+		new("TextLabel", {
+			Size = UDim2.new(1, -14, 0, 14), Position = UDim2.fromOffset(8, 26),
+			BackgroundTransparency = 1, Text = subtitle, Font = Enum.Font.Gotham, TextSize = 10,
+			TextColor3 = THEME.dim, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 5, Parent = btn,
+		})
+	end
+	btn.Activated:Connect(onClick)
+	return btn
+end
+
+------------------------------------------------------------------
+-- JANELA DE ALVO
+------------------------------------------------------------------
+local targetDialog = new("Frame", {
+	Name = "JanelaAlvo", Visible = false, Size = UDim2.fromOffset(250, 176),
+	AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45),
+	BackgroundColor3 = THEME.panel, BorderSizePixel = 0, ZIndex = 20, Parent = gui,
+}, { round(10), stroke(THEME.accent, 1.5) })
+
+new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 28), Position = UDim2.fromOffset(0, 6), BackgroundTransparency = 1,
+	Text = "BLACK ARROW", Font = Enum.Font.GothamBlack, TextSize = 15, TextColor3 = THEME.text,
+	ZIndex = 21, Parent = targetDialog,
+})
+new("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 32), Position = UDim2.fromOffset(10, 34), BackgroundTransparency = 1,
+	Text = "Insira o nome do personagem que é o alvo", Font = Enum.Font.Gotham, TextSize = 12,
+	TextColor3 = THEME.dim, TextWrapped = true, ZIndex = 21, Parent = targetDialog,
+})
+local targetBox = new("TextBox", {
+	Size = UDim2.new(1, -20, 0, 34), Position = UDim2.fromOffset(10, 70),
+	BackgroundColor3 = THEME.bg, Text = "", PlaceholderText = "Nome do personagem",
+	PlaceholderColor3 = THEME.dim, Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = THEME.text,
+	ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 21, Parent = targetDialog,
+}, { round(8), stroke(THEME.stroke, 1), new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }) })
+
+local sendBtn = new("TextButton", {
+	Size = UDim2.new(0.5, -15, 0, 34), Position = UDim2.new(0, 10, 1, -44),
+	BackgroundColor3 = THEME.accent, Text = "ENVIAR", Font = Enum.Font.GothamBold, TextSize = 13,
+	TextColor3 = THEME.text, ZIndex = 21, Parent = targetDialog,
+}, { round(8) })
+local cancelBtn = new("TextButton", {
+	Size = UDim2.new(0.5, -15, 0, 34), Position = UDim2.new(0.5, 5, 1, -44),
+	BackgroundColor3 = THEME.card, Text = "CANCELAR", Font = Enum.Font.GothamBold, TextSize = 13,
+	TextColor3 = THEME.text, ZIndex = 21, Parent = targetDialog,
+}, { round(8), stroke(THEME.stroke, 1) })
+
+------------------------------------------------------------------
+-- JANELA DE CÓPIA MANUAL (plano B quando o chat não aceita o envio)
+------------------------------------------------------------------
+local copyDialog = new("Frame", {
+	Name = "JanelaCopia", Visible = false, Size = UDim2.fromOffset(270, 196),
+	AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45),
+	BackgroundColor3 = THEME.panel, BorderSizePixel = 0, ZIndex = 25, Parent = gui,
+}, { round(10), stroke(THEME.danger, 1.5) })
+
+local copyReason = new("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 34), Position = UDim2.fromOffset(10, 6), BackgroundTransparency = 1,
+	Text = "", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = THEME.text,
+	TextWrapped = true, ZIndex = 26, Parent = copyDialog,
+})
+new("TextLabel", {
+	Size = UDim2.new(1, -20, 0, 30), Position = UDim2.fromOffset(10, 40), BackgroundTransparency = 1,
+	Text = "A mensagem NÃO foi enviada. Segure o texto abaixo, selecione, copie e cole no chat.",
+	Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = THEME.dim, TextWrapped = true,
+	ZIndex = 26, Parent = copyDialog,
+})
+local copyBox = new("TextBox", {
+	Size = UDim2.new(1, -20, 0, 70), Position = UDim2.fromOffset(10, 74),
+	BackgroundColor3 = THEME.bg, Text = "", Font = Enum.Font.Gotham, TextSize = 12,
+	TextColor3 = THEME.text, ClearTextOnFocus = false, MultiLine = true, TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+	ZIndex = 26, Parent = copyDialog,
+}, { round(8), stroke(THEME.stroke, 1), new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 4) }) })
+local copyClose = new("TextButton", {
+	Size = UDim2.new(1, -20, 0, 34), Position = UDim2.new(0, 10, 1, -42),
+	BackgroundColor3 = THEME.accent, Text = "FECHAR", Font = Enum.Font.GothamBold, TextSize = 13,
+	TextColor3 = THEME.text, ZIndex = 26, Parent = copyDialog,
+}, { round(8) })
+
+copyClose.Activated:Connect(function()
+	copyDialog.Visible = false
+end)
+
+------------------------------------------------------------------
+-- ENVIO COM PROTEÇÃO CONTRA DUPLICIDADE
+------------------------------------------------------------------
+local sendLocked = false
+
+local function deliver(message)
+	if sendLocked then return end
+	sendLocked = true
+	task.delay(1.2, function() sendLocked = false end)
+
+	if utf8.len(message) and utf8.len(message) > MAX_CHAT_LENGTH then
+		setStatus("Mensagem passa de " .. MAX_CHAT_LENGTH .. " caracteres. Use um nome menor.", false)
+		return
+	end
+
+	local ok, reason = sendChatMessage(message)
+	if ok then
+		setStatus("Mensagem enviada ao chat.", true)
+	else
+		copyReason.Text = reason or "Não foi possível enviar."
+		copyBox.Text = message
+		copyDialog.Visible = true
+		setStatus("Não enviado: " .. (reason or "erro desconhecido"), false)
+	end
+end
+
+local pendingItem = nil
+
+local function closeTargetDialog()
+	pendingItem = nil
+	targetDialog.Visible = false
+	targetBox:ReleaseFocus()
+	targetBox.Text = ""
+end
+
+local function submitTarget()
+	if not pendingItem then return end
+	local name = cleanName(targetBox.Text)
+	if name == "" then
+		setStatus("Digite o nome do alvo.", false)
+		return -- campo vazio: não envia nada
+	end
+	local message = buildMessage(pendingItem.text, name)
+	closeTargetDialog()
+	deliver(message)
+end
+
+local function openTargetDialog(item)
+	pendingItem = item
+	targetBox.Text = ""
+	copyDialog.Visible = false
+	targetDialog.Visible = true
+end
+
+sendBtn.Activated:Connect(submitTarget)
+cancelBtn.Activated:Connect(closeTargetDialog)
+targetBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then submitTarget() end
+end)
+
+------------------------------------------------------------------
+-- NAVEGAÇÃO ENTRE CATEGORIAS
+------------------------------------------------------------------
+local showCategories
+
+local function onAction(item)
+	if item.target then
+		openTargetDialog(item)
+	else
+		deliver(item.text) -- falas: sem janela de alvo
+	end
+end
+
+local function showCategory(category)
+	clearContent()
+	titleLabel.Text = string.upper(category.name)
+	backBtn.Visible = true
+	for i, item in ipairs(category.items) do
+		makeListButton(item.label, i, item.target and "pede o alvo" or "envia direto", function()
+			onAction(item)
+		end)
+	end
+end
+
+showCategories = function()
+	clearContent()
+	titleLabel.Text = "BLACK ARROW"
+	backBtn.Visible = false
+	for i, category in ipairs(CATEGORIES) do
+		makeListButton(category.name, i, #category.items .. " ações", function()
+			showCategory(category)
+		end)
+	end
+end
+
+backBtn.Activated:Connect(showCategories)
+
+local function setPanelOpen(open)
+	panel.Visible = open
+	if not open then
+		closeTargetDialog()
+		copyDialog.Visible = false
+	end
+end
+
+closeBtn.Activated:Connect(function() setPanelOpen(false) end)
+
+------------------------------------------------------------------
+-- ARRASTAR (botão flutuante e painel)
+------------------------------------------------------------------
+local function clampToScreen(obj)
+	local vp = gui.AbsoluteSize
+	local pos = obj.AbsolutePosition - gui.AbsolutePosition
+	local size = obj.AbsoluteSize
+	local dx, dy = 0, 0
+	if pos.X < 0 then dx = -pos.X elseif pos.X + size.X > vp.X then dx = vp.X - (pos.X + size.X) end
+	if pos.Y < 0 then dy = -pos.Y elseif pos.Y + size.Y > vp.Y then dy = vp.Y - (pos.Y + size.Y) end
+	if dx ~= 0 or dy ~= 0 then
+		obj.Position = UDim2.new(obj.Position.X.Scale, obj.Position.X.Offset + dx,
+			obj.Position.Y.Scale, obj.Position.Y.Offset + dy)
+	end
+end
+
+-- Se soltar sem arrastar, conta como toque (onTap).
+local function makeDraggable(handle, target, onTap)
+	local dragging, moved, dragStart, startPos = false, false, nil, nil
+	handle.InputBegan:Connect(function(input)
+		local kind = input.UserInputType
+		if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch then
+			dragging, moved = true, false
+			dragStart = input.Position
+			startPos = target.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+					clampToScreen(target)
+					if not moved and onTap then onTap() end
+				end
+			end)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if not dragging then return end
+		local kind = input.UserInputType
+		if kind == Enum.UserInputType.MouseMovement or kind == Enum.UserInputType.Touch then
+			local delta = input.Position - dragStart
+			if delta.Magnitude > 8 then moved = true end
+			if moved then
+				target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+					startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			end
+		end
+	end)
+end
+
+makeDraggable(header, panel, nil)
+makeDraggable(floatBtn, floatBtn, function()
+	setPanelOpen(not panel.Visible)
+end)
+
+-- Ajusta o tamanho do painel para telas pequenas
+local function applyScale()
+	local vp = gui.AbsoluteSize
+	if vp.X <= 0 or vp.Y <= 0 then return end
+	uiScale.Scale = math.clamp(math.min(vp.Y / (PANEL_H + 30), vp.X / (PANEL_W + 70)), 0.65, 1)
+	clampToScreen(panel)
+	clampToScreen(floatBtn)
+end
+gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(applyScale)
+task.defer(applyScale)
+
+-- Início: painel fechado, categorias montadas
+showCategories()
