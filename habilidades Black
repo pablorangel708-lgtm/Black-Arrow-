@@ -1,4 +1,4 @@
---// BLACK ARROW: PODERES ESPACIAIS (LocalScript único)
+--// BLACK ARROW: PODERES ESPACIAIS (LocalScript único, sem limites)
 --// Local: StarterPlayer > StarterPlayerScripts
 
 local Players = game:GetService("Players")
@@ -14,28 +14,18 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- CONFIGURAÇÃO
 ------------------------------------------------------------------
 local Config = {
-	MaxEnergy = 100,
-	RegenPerSecond = 6,
-	RegenDelay = 1.5,
-	MinRangeFactor = 0.5,      -- sem energia o alcance cai para 50%
-	FatigueLimit = 80,         -- uso excessivo causa esgotamento
-	FatigueDecay = 2.5,
-	ExhaustDuration = 8,
-	MinFloorNormalY = 0.7,     -- só aceita piso/telhado
-	ForbiddenFolderName = "ZonasProibidas", -- pasta no Workspace com Parts das áreas proibidas
 	CombatOffset = 3.5,
 	PortalDuration = 25,
 	PortalEntryDistance = 6,
-	MarkLifetime = 300,
-	RecallCostPerStud = 0.05,
+	DodgeDistance = 14,
 	Powers = {
-		teleport = { name = "Teletransporte", cost = 20, cooldown = 3, range = 70, maxHeight = 15 },
-		combat   = { name = "Tele-Combate", cost = 25, cooldown = 4, range = 60 },
-		portal   = { name = "Portal Espacial", cost = 35, cooldown = 12, range = 100, maxHeight = 60 },
-		dodge    = { name = "Esquiva Espacial", cost = 12, cooldown = 1.5, range = 14 },
-		aerial   = { name = "Tele-Aéreo", cost = 35, cooldown = 6, range = 140, maxHeight = 90 },
-		mark     = { name = "Marcação", cost = 5, cooldown = 2 },
-		recall   = { name = "Retorno", cost = 15, cooldown = 5, range = 180 },
+		teleport = { name = "Teletransporte", cooldown = 1 },
+		combat   = { name = "Tele-Combate", cooldown = 1.5 },
+		portal   = { name = "Portal Espacial", cooldown = 5 },
+		dodge    = { name = "Esquiva Espacial", cooldown = 1 },
+		aerial   = { name = "Tele-Aéreo", cooldown = 1 },
+		mark     = { name = "Marcação", cooldown = 1 },
+		recall   = { name = "Retorno", cooldown = 2 },
 	},
 }
 
@@ -46,19 +36,18 @@ local THEME = {
 	stroke = Color3.fromRGB(30, 110, 60),
 	accent = Color3.fromRGB(60, 225, 120),
 	dim = Color3.fromRGB(105, 145, 120),
-	danger = Color3.fromRGB(215, 70, 70),
 	warn = Color3.fromRGB(225, 175, 55),
 	text = Color3.fromRGB(215, 240, 224),
 }
 
 local ORDER = {
-	{ id = "teleport", label = "Teletransporte", mode = "aim" },
-	{ id = "combat", label = "Tele-Combate", mode = "combat" },
-	{ id = "portal", label = "Portal Espacial", mode = "aim" },
-	{ id = "dodge", label = "Esquiva", mode = "dodge" },
-	{ id = "aerial", label = "Tele-Aéreo", mode = "aim" },
-	{ id = "mark", label = "Marcar", mode = "plain" },
-	{ id = "recall", label = "Retornar", mode = "plain" },
+	{ id = "teleport", label = "Teletransporte", mode = "aim", info = "Qualquer lugar" },
+	{ id = "combat", label = "Tele-Combate", mode = "plain", info = "Alvo mais próximo" },
+	{ id = "portal", label = "Portal Espacial", mode = "aim", info = "Entrada + saída" },
+	{ id = "dodge", label = "Esquiva", mode = "plain", info = "Salto curto" },
+	{ id = "aerial", label = "Tele-Aéreo", mode = "aim", info = "Telhados / céu" },
+	{ id = "mark", label = "Marcar", mode = "plain", info = "Fixa aqui" },
+	{ id = "recall", label = "Retornar", mode = "plain", info = "SEM MARCA" },
 }
 
 local KEYBINDS = {
@@ -68,20 +57,15 @@ local KEYBINDS = {
 	[Enum.KeyCode.Seven] = "recall",
 }
 
-local PANEL_W, PANEL_H = 236, 294
+local PANEL_W, PANEL_H = 236, 272
 
 ------------------------------------------------------------------
 -- ESTADO
 ------------------------------------------------------------------
 local S = {
-	energy = Config.MaxEnergy,
-	lastUse = 0,
-	fatigue = 0,
-	exhaustedUntil = 0,
-	wasExhausted = false,
 	cooldowns = {},
-	mark = nil,        -- { pos = Vector3, time = number }
-	portal = nil,      -- { a, b, expires }
+	mark = nil,
+	portal = nil,
 	aiming = nil,
 	aimDeadline = 0,
 	transitUntil = 0,
@@ -116,28 +100,21 @@ local function flat(v)
 	return f.Unit
 end
 
-local function rayParams(extra)
+local fxFolder = new("Folder", { Name = "BA_Efeitos", Parent = Workspace })
+
+local function rayParams()
 	local p = RaycastParams.new()
 	p.FilterType = Enum.RaycastFilterType.Exclude
-	local list = { getChar() }
-	if extra then for _, e in ipairs(extra) do table.insert(list, e) end end
-	p.FilterDescendantsInstances = list
+	p.FilterDescendantsInstances = { getChar(), fxFolder }
 	p.IgnoreWater = true
 	return p
 end
-
-local fxFolder = new("Folder", { Name = "BA_Efeitos", Parent = Workspace })
 
 local function hrpOffset()
 	local hum, hrp = getHumanoid(), getHrp()
 	if not hum or not hrp then return 3 end
 	if hum.RigType == Enum.HumanoidRigType.R6 then return 3 end
 	return math.max(2.5, hum.HipHeight + hrp.Size.Y / 2)
-end
-
-local function belongsToHumanoid(inst)
-	local model = inst:FindFirstAncestorOfClass("Model")
-	return model ~= nil and model:FindFirstChildOfClass("Humanoid") ~= nil
 end
 
 local function flash(position)
@@ -152,8 +129,27 @@ local function flash(position)
 	task.delay(0.6, function() part:Destroy() end)
 end
 
+local function moveTo(pos, faceDir)
+	local char, hrp = getChar(), getHrp()
+	if not char or not hrp then return end
+	local look = (faceDir and flat(faceDir)) or flat(hrp.CFrame.LookVector) or Vector3.new(0, 0, -1)
+	flash(hrp.Position)
+	char:PivotTo(CFrame.lookAt(pos, pos + look))
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	hrp.AssemblyAngularVelocity = Vector3.zero
+	flash(pos)
+end
+
+-- Converte o ponto tocado em posição de destino (sempre aceita).
+local function placeFromHit(res)
+	if res.Normal.Y >= 0.7 then
+		return res.Position + Vector3.new(0, hrpOffset() + 0.15, 0)
+	end
+	return res.Position + res.Normal * 2.5 + Vector3.new(0, 1, 0)
+end
+
 ------------------------------------------------------------------
--- AVISOS (TOAST) E INTERFACE
+-- AVISOS E INTERFACE
 ------------------------------------------------------------------
 local gui = new("ScreenGui", {
 	Name = "BlackArrowUI", ResetOnSpawn = false, DisplayOrder = 20,
@@ -175,7 +171,7 @@ local function showToast(text, good)
 	toast.TextColor3 = good and THEME.accent or THEME.warn
 	toast.TextTransparency = 0
 	toast.BackgroundTransparency = 0.2
-	task.delay(3, function()
+	task.delay(2.5, function()
 		if toastToken == mine then
 			TweenService:Create(toast, TweenInfo.new(0.4), {
 				TextTransparency = 1, BackgroundTransparency = 1,
@@ -217,24 +213,8 @@ new("TextLabel", {
 	Text = "=", Font = Enum.Font.GothamBold, TextSize = 16, TextColor3 = THEME.dim, Parent = header,
 })
 
-local energyBar = new("Frame", {
-	Size = UDim2.new(1, -12, 0, 26), Position = UDim2.fromOffset(6, 32),
-	BackgroundColor3 = Color3.fromRGB(5, 7, 6), BorderSizePixel = 0, Parent = panel,
-}, {
-	new("UICorner", { CornerRadius = UDim.new(0, 7) }),
-	new("UIStroke", { Color = THEME.stroke, Thickness = 1 }),
-})
-local energyFill = new("Frame", {
-	Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = THEME.accent, BackgroundTransparency = 0.35,
-	BorderSizePixel = 0, Parent = energyBar,
-}, { new("UICorner", { CornerRadius = UDim.new(0, 7) }) })
-local energyText = new("TextLabel", {
-	Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "ENERGIA",
-	Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = THEME.text, ZIndex = 3, Parent = energyBar,
-})
-
 local grid = new("Frame", {
-	Size = UDim2.new(1, -12, 0, 226), Position = UDim2.fromOffset(6, 64),
+	Size = UDim2.new(1, -12, 0, 230), Position = UDim2.fromOffset(6, 34),
 	BackgroundTransparency = 1, Parent = panel,
 }, {
 	new("UIGridLayout", {
@@ -265,7 +245,8 @@ local function makeButton(id, label, order, infoText, onClick)
 	local info = new("TextLabel", {
 		Position = UDim2.fromOffset(6, 19), Size = UDim2.new(1, -12, 0, 13), BackgroundTransparency = 1,
 		Text = infoText, Font = Enum.Font.Gotham, TextSize = 10, TextColor3 = THEME.dim,
-		TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 3, Parent = btn,
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 3, Parent = btn,
 	})
 	local state = new("TextLabel", {
 		Position = UDim2.fromOffset(6, 33), Size = UDim2.new(1, -12, 0, 14), BackgroundTransparency = 1,
@@ -277,136 +258,25 @@ local function makeButton(id, label, order, infoText, onClick)
 end
 
 ------------------------------------------------------------------
--- VALIDAÇÃO DE LOCAIS
+-- COOLDOWN
 ------------------------------------------------------------------
-local function isForbidden(pos)
-	local folder = Workspace:FindFirstChild(Config.ForbiddenFolderName)
-	if not folder then return false end
-	for _, inst in ipairs(folder:GetDescendants()) do
-		if inst:IsA("BasePart") then
-			local lp = inst.CFrame:PointToObjectSpace(pos)
-			local h = inst.Size / 2
-			if math.abs(lp.X) <= h.X and math.abs(lp.Y) <= h.Y and math.abs(lp.Z) <= h.Z then
-				return true
-			end
-		end
-	end
-	return false
-end
-
-local function isSpaceFree(pos)
-	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { getChar(), fxFolder }
-	local parts = Workspace:GetPartBoundsInBox(CFrame.new(pos), Vector3.new(2.6, 5.2, 2.6), params)
-	for _, part in ipairs(parts) do
-		if part.CanCollide then return false end
-	end
-	return true
-end
-
--- Converte um ponto de superfície em posição segura em pé.
-local function standFromHit(res)
-	if res.Normal.Y < Config.MinFloorNormalY then
-		return nil, "Mire em um piso ou telhado (não em paredes)."
-	end
-	if belongsToHumanoid(res.Instance) then return nil, "Destino ocupado." end
-	if res.Instance:GetAttribute("NoTeleport") == true then return nil, "Superfície proibida." end
-	local stand = res.Position + Vector3.new(0, hrpOffset() + 0.15, 0)
-	if isForbidden(stand) then return nil, "Área proibida." end
-	if not isSpaceFree(stand) then return nil, "Sem espaço livre no destino." end
-	return stand
-end
-
-local function findStandAt(approx, up, down)
-	local origin = approx + Vector3.new(0, up, 0)
-	local res = Workspace:Raycast(origin, Vector3.new(0, -(up + down), 0), rayParams({ fxFolder }))
-	if not res then return nil, "Sem chão no destino." end
-	local stand, why = standFromHit(res)
-	if not stand then return nil, why end
-	return stand, res
-end
-
--- Só teleporta para locais conhecidos (linha de visão).
-local function visibleSurface(hrp, point)
-	local origin = hrp.Position + Vector3.new(0, 1.5, 0)
-	local offset = point - origin
-	local dist = offset.Magnitude
-	if dist < 1 then return nil, "Destino muito próximo." end
-	local res = Workspace:Raycast(origin, offset.Unit * (dist + 3), rayParams({ fxFolder }))
-	if not res or (res.Position - point).Magnitude > 3 then
-		return nil, "Local desconhecido: sem linha de visão."
-	end
-	return res
-end
-
-local function moveTo(pos, faceDir)
-	local char, hrp = getChar(), getHrp()
-	if not char or not hrp then return end
-	local look = (faceDir and flat(faceDir)) or flat(hrp.CFrame.LookVector) or Vector3.new(0, 0, -1)
-	flash(hrp.Position)
-	char:PivotTo(CFrame.lookAt(pos, pos + look))
-	hrp.AssemblyLinearVelocity = Vector3.zero
-	hrp.AssemblyAngularVelocity = Vector3.zero
-	flash(pos)
-end
-
-------------------------------------------------------------------
--- ENERGIA, RECARGA E ESGOTAMENTO
-------------------------------------------------------------------
-local function effectiveRange(id)
-	local p = Config.Powers[id]
-	if not p or not p.range then return nil end
-	local f = Config.MinRangeFactor
-		+ (1 - Config.MinRangeFactor) * math.clamp(S.energy / Config.MaxEnergy, 0, 1)
-	return p.range * f
-end
-
-local function exhaust()
-	S.exhaustedUntil = os.clock() + Config.ExhaustDuration
-	S.wasExhausted = true
-	S.aiming = nil
-	showToast("Esgotamento espacial! Poderes bloqueados por " .. Config.ExhaustDuration .. "s.", false)
-end
-
--- Confere tudo antes de usar. Nada é cobrado aqui.
-local function prepare(id, costOverride)
+local function prepare(id)
 	local hum, hrp = getHumanoid(), getHrp()
 	if not hum or not hrp or hum.Health <= 0 then
 		showToast("Personagem indisponível.", false)
 		return nil
 	end
-	if hum.SeatPart then
-		showToast("Não é possível usar poderes sentado.", false)
-		return nil
-	end
 	local t = os.clock()
-	if t < S.exhaustedUntil then
-		showToast(string.format("Esgotado! Aguarde %.0fs.", S.exhaustedUntil - t), false)
-		return nil
-	end
 	local cfg = Config.Powers[id]
 	if t < (S.cooldowns[id] or 0) then
 		showToast(string.format("%s em recarga (%.1fs).", cfg.name, S.cooldowns[id] - t), false)
 		return nil
 	end
-	local cost = costOverride or cfg.cost
-	if S.energy < cost then
-		showToast(string.format("Energia insuficiente (precisa de %d).", math.ceil(cost)), false)
-		return nil
-	end
-	return { id = id, cfg = cfg, cost = cost, hum = hum, hrp = hrp }
+	return { id = id, cfg = cfg, hum = hum, hrp = hrp }
 end
 
 local function commit(ctx)
-	local t = os.clock()
-	S.energy = math.max(0, S.energy - ctx.cost)
-	S.cooldowns[ctx.id] = t + ctx.cfg.cooldown
-	S.lastUse = t
-	S.fatigue += ctx.cost
-	if S.energy <= 0.01 or S.fatigue >= Config.FatigueLimit then
-		exhaust()
-	end
+	S.cooldowns[ctx.id] = os.clock() + ctx.cfg.cooldown
 end
 
 ------------------------------------------------------------------
@@ -414,108 +284,75 @@ end
 ------------------------------------------------------------------
 local Powers = {}
 
-local function pointTeleport(id, point)
-	local ctx = prepare(id)
+function Powers.teleport(pos)
+	local ctx = prepare("teleport")
 	if not ctx then return end
-	local res, err = visibleSurface(ctx.hrp, point)
-	if not res then return showToast(err, false) end
-
-	local range = effectiveRange(id)
-	local dist = (res.Position - ctx.hrp.Position).Magnitude
-	if dist > range then
-		return showToast(string.format("Fora de alcance (%d/%d).", math.floor(dist), math.floor(range)), false)
-	end
-	local feetY = ctx.hrp.Position.Y - hrpOffset()
-	if math.abs(res.Position.Y - feetY) > ctx.cfg.maxHeight then
-		return showToast("Diferença de altura grande demais para este poder.", false)
-	end
-	local stand, why = standFromHit(res)
-	if not stand then return showToast(why, false) end
-
-	moveTo(stand, nil)
+	moveTo(pos, nil)
 	commit(ctx)
 end
 
-function Powers.teleport(point) pointTeleport("teleport", point) end
-function Powers.aerial(point) pointTeleport("aerial", point) end
+function Powers.aerial(pos)
+	local ctx = prepare("aerial")
+	if not ctx then return end
+	moveTo(pos, nil)
+	commit(ctx)
+end
 
 function Powers.combat()
 	local ctx = prepare("combat")
 	if not ctx then return end
-	local range = effectiveRange("combat")
 	local cam = Workspace.CurrentCamera
-
-	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { getChar(), fxFolder }
-	local parts = Workspace:GetPartBoundsInRadius(ctx.hrp.Position, range, params)
-
-	local seen, target, tRoot, bestScore = {}, nil, nil, math.huge
 	local camLook = cam and cam.CFrame.LookVector or ctx.hrp.CFrame.LookVector
-	for _, part in ipairs(parts) do
-		local model = part:FindFirstAncestorOfClass("Model")
-		if model and not seen[model] then
-			seen[model] = true
-			local hum = model:FindFirstChildOfClass("Humanoid")
-			local root = model:FindFirstChild("HumanoidRootPart")
+
+	local target, tRoot, bestScore
+	bestScore = math.huge
+	for _, other in ipairs(Players:GetPlayers()) do
+		local char = other.Character
+		if other ~= player and char then
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			local root = char:FindFirstChild("HumanoidRootPart")
 			if hum and root and hum.Health > 0 then
 				local offset = root.Position - ctx.hrp.Position
 				local d = offset.Magnitude
-				if d > 1 and d <= range then
+				if d > 1 then
 					local score = d * (2 - offset.Unit:Dot(camLook))
 					if score < bestScore then
-						target, tRoot, bestScore = model, root, score
+						target, tRoot, bestScore = char, root, score
 					end
 				end
 			end
 		end
 	end
-	if not target then return showToast("Nenhum alvo válido ao alcance.", false) end
-
-	local origin = ctx.hrp.Position + Vector3.new(0, 1.5, 0)
-	local los = Workspace:Raycast(origin, tRoot.Position - origin, rayParams({ fxFolder }))
-	if los and not los.Instance:IsDescendantOf(target) then
-		return showToast("Alvo fora da linha de visão.", false)
-	end
-
-	local look = flat(tRoot.CFrame.LookVector) or Vector3.new(0, 0, -1)
-	local right = flat(tRoot.CFrame.RightVector) or Vector3.new(1, 0, 0)
-	local d = Config.CombatOffset
-	local candidates = { -look * d, right * d, -right * d, look * d } -- atrás, lados, frente
-	for _, offset in ipairs(candidates) do
-		local stand = findStandAt(tRoot.Position + offset, 2, 12)
-		if stand and math.abs(stand.Y - tRoot.Position.Y) <= 6 then
-			moveTo(stand, tRoot.Position - stand)
-			commit(ctx)
-			return
+	-- sem jogadores: procura NPCs com Humanoid no Workspace
+	if not target then
+		for _, model in ipairs(Workspace:GetDescendants()) do
+			if model:IsA("Humanoid") and model.Health > 0 then
+				local char = model.Parent
+				local root = char and char:FindFirstChild("HumanoidRootPart")
+				if root and char ~= getChar() then
+					local d = (root.Position - ctx.hrp.Position).Magnitude
+					if d > 1 and d < bestScore then
+						target, tRoot, bestScore = char, root, d
+					end
+				end
+			end
 		end
 	end
-	showToast("Sem espaço seguro ao redor do alvo.", false)
+	if not target then return showToast("Nenhum alvo encontrado.", false) end
+
+	local look = flat(tRoot.CFrame.LookVector) or Vector3.new(0, 0, -1)
+	local pos = tRoot.Position - look * Config.CombatOffset
+	moveTo(pos, tRoot.Position - pos)
+	commit(ctx)
 end
 
 function Powers.dodge()
 	local ctx = prepare("dodge")
 	if not ctx then return end
 	local look = flat(ctx.hrp.CFrame.LookVector) or Vector3.new(0, 0, -1)
-	local base = flat(ctx.hum.MoveDirection) or -look
-	local perp = Vector3.new(-base.Z, 0, base.X)
-	local range = effectiveRange("dodge")
-	local directions = { base, perp, -perp, -base }
-
-	for _, dist in ipairs({ range, range * 0.6 }) do
-		for _, dir in ipairs(directions) do
-			local blocked = Workspace:Raycast(ctx.hrp.Position, dir * dist, rayParams({ fxFolder }))
-			if not blocked then
-				local stand = findStandAt(ctx.hrp.Position + dir * dist, 2, 10)
-				if stand and math.abs(stand.Y - ctx.hrp.Position.Y) <= 8 then
-					moveTo(stand, nil)
-					commit(ctx)
-					return
-				end
-			end
-		end
-	end
-	showToast("Sem espaço seguro para esquivar.", false)
+	local dir = flat(ctx.hum.MoveDirection) or -look
+	moveTo(ctx.hrp.Position + dir * Config.DodgeDistance, nil)
+	commit(ctx)
 end
 
 -- Marcação / retorno -------------------------------------------------
@@ -527,7 +364,7 @@ local beacon = new("Part", {
 
 local function updateBeacon()
 	if S.mark then
-		beacon.CFrame = CFrame.new(S.mark.pos - Vector3.new(0, hrpOffset() - 0.1, 0))
+		beacon.CFrame = CFrame.new(S.mark - Vector3.new(0, hrpOffset() - 0.1, 0))
 			* CFrame.Angles(0, 0, math.pi / 2)
 		beacon.Parent = Workspace
 	else
@@ -538,46 +375,24 @@ end
 function Powers.mark()
 	local ctx = prepare("mark")
 	if not ctx then return end
-	if ctx.hum.FloorMaterial == Enum.Material.Air then
-		return showToast("Fique em solo firme para marcar a posição.", false)
-	end
-	if isForbidden(ctx.hrp.Position) then
-		return showToast("Área proibida para marcação.", false)
-	end
-	S.mark = { pos = ctx.hrp.Position, time = os.clock() }
+	S.mark = ctx.hrp.Position
 	updateBeacon()
-	flash(ctx.hrp.Position - Vector3.new(0, 2, 0))
+	flash(S.mark - Vector3.new(0, 2, 0))
 	commit(ctx)
 	showToast("Posição marcada.", true)
 end
 
 function Powers.recall()
-	local hrp = getHrp()
-	if not hrp then return end
 	if not S.mark then return showToast("Nenhuma marcação ativa.", false) end
-
-	local dist = (S.mark.pos - hrp.Position).Magnitude
-	local cost = Config.Powers.recall.cost + dist * Config.RecallCostPerStud
-	local ctx = prepare("recall", cost)
+	local ctx = prepare("recall")
 	if not ctx then return end
-
-	local range = effectiveRange("recall")
-	if dist > range then
-		return showToast(string.format("Marcação longe demais (%d/%d).", math.floor(dist), math.floor(range)), false)
-	end
-	local stand = findStandAt(S.mark.pos, 2, 10)
-	if not stand then return showToast("O local da marcação não é mais seguro.", false) end
-	if (stand - S.mark.pos).Magnitude > 6 then
-		return showToast("O terreno da marcação mudou.", false)
-	end
-	moveTo(stand, nil)
+	moveTo(S.mark, nil)
 	commit(ctx)
 end
 
 -- Portais ---------------------------------------------------------------
-local function makePortal(endpoint)
-	local center = endpoint.floor + Vector3.new(0, 3.6, 0)
-	local base = CFrame.lookAt(center, center + endpoint.dir) * CFrame.Angles(0, math.pi / 2, 0)
+local function makePortal(center, dir)
+	local base = CFrame.lookAt(center, center + dir) * CFrame.Angles(0, math.pi / 2, 0)
 	local model = new("Model", { Name = "BA_Portal", Parent = fxFolder })
 	new("Part", {
 		Name = "Moldura", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.4, 8.4, 8.4),
@@ -603,50 +418,21 @@ local function destroyPortal()
 	end
 end
 
-function Powers.portal(point)
+function Powers.portal(pos)
 	local ctx = prepare("portal")
 	if not ctx then return end
 	local hrp = ctx.hrp
-
-	local resB, err = visibleSurface(hrp, point)
-	if not resB then return showToast(err, false) end
-
-	local range = effectiveRange("portal")
-	local dist = (resB.Position - hrp.Position).Magnitude
-	if dist > range then
-		return showToast(string.format("Fora de alcance (%d/%d).", math.floor(dist), math.floor(range)), false)
-	end
-	local feetY = hrp.Position.Y - hrpOffset()
-	if math.abs(resB.Position.Y - feetY) > ctx.cfg.maxHeight then
-		return showToast("Diferença de altura grande demais.", false)
-	end
-	local standB, whyB = standFromHit(resB)
-	if not standB then return showToast(whyB, false) end
-
 	local look = flat(hrp.CFrame.LookVector) or Vector3.new(0, 0, -1)
-	local standA, resA
-	for _, d in ipairs({ Config.PortalEntryDistance, 4 }) do
-		standA, resA = findStandAt(hrp.Position + look * d, 2, 10)
-		if standA then break end
-	end
-	if not standA then return showToast("Sem espaço para abrir o portal à sua frente.", false) end
 
-	local floorA, floorB = resA.Position, resB.Position
-	if (floorA - floorB).Magnitude < 8 then
-		return showToast("Destino perto demais do portal de entrada.", false)
-	end
+	local centerA = hrp.Position + look * Config.PortalEntryDistance
+	local centerB = pos
 	local dirA = -look
-	local dirB = flat(floorA - floorB) or look
-	local exitA = findStandAt(floorA + dirA * 4, 2, 10)
-	local exitB = findStandAt(floorB + dirB * 4, 2, 10)
-	if not exitA or not exitB then
-		return showToast("Sem espaço de saída para o portal.", false)
-	end
+	local dirB = flat(centerA - centerB) or look
 
 	destroyPortal()
-	local a = { floor = floorA, dir = dirA, exit = exitA, center = floorA + Vector3.new(0, 3.6, 0) }
-	local b = { floor = floorB, dir = dirB, exit = exitB, center = floorB + Vector3.new(0, 3.6, 0) }
-	a.model, b.model = makePortal(a), makePortal(b)
+	local a = { center = centerA, dir = dirA, exit = centerA + dirA * 4 }
+	local b = { center = centerB, dir = dirB, exit = centerB + dirB * 4 }
+	a.model, b.model = makePortal(a.center, a.dir), makePortal(b.center, b.dir)
 	S.portal = { a = a, b = b, expires = os.clock() + Config.PortalDuration }
 
 	flash(a.center)
@@ -655,7 +441,6 @@ function Powers.portal(point)
 	showToast("Portal aberto por " .. Config.PortalDuration .. "s.", true)
 end
 
--- Atravessar o portal (checagem por proximidade)
 local function updatePortal()
 	local p = S.portal
 	if not p then return end
@@ -673,38 +458,35 @@ local function updatePortal()
 	local dest
 	if inside(p.a) then dest = p.b elseif inside(p.b) then dest = p.a end
 	if not dest then return end
-	if isForbidden(dest.exit) or not isSpaceFree(dest.exit) then
-		S.transitUntil = os.clock() + 1.5
-		return showToast("A saída do portal está bloqueada.", false)
-	end
-	S.transitUntil = os.clock() + 2.5
+	S.transitUntil = os.clock() + 2
 	moveTo(dest.exit, dest.dir)
 end
 
 ------------------------------------------------------------------
--- MIRA POR TOQUE
+-- MIRA POR TOQUE (qualquer lugar)
 ------------------------------------------------------------------
-local ring = new("Part", {
-	Name = "BA_AimRing", Anchored = true, CanCollide = false, CanQuery = false, CanTouch = false,
-	CastShadow = false, Material = Enum.Material.Neon, Color = THEME.accent, Transparency = 0.82,
-	Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 10, 10),
-})
-
 local function setAim(id)
 	S.aiming = id
 	S.aimDeadline = os.clock() + 12
-	showToast("Toque no destino: " .. Config.Powers[id].name .. ".", true)
+	showToast("Toque em qualquer lugar: " .. Config.Powers[id].name .. ".", true)
 end
 
 local function handleAimTap(screenPos)
 	local cam = Workspace.CurrentCamera
 	if not S.aiming or not cam then return end
 	local ray = cam:ViewportPointToRay(screenPos.X, screenPos.Y)
-	local res = Workspace:Raycast(ray.Origin, ray.Direction * 600, rayParams({ fxFolder }))
-	if not res then return showToast("Toque em uma superfície visível.", false) end
+	local res = Workspace:Raycast(ray.Origin, ray.Direction * 5000, rayParams())
+
+	local pos
+	if res then
+		pos = placeFromHit(res)
+	else
+		pos = ray.Origin + ray.Direction * 300 -- toque no céu: vai para o ar
+	end
+
 	local id = S.aiming
 	S.aiming = nil
-	local ok, err = pcall(Powers[id], res.Position)
+	local ok, err = pcall(Powers[id], pos)
 	if not ok then
 		warn("[BlackArrow] erro em " .. id .. ": " .. tostring(err))
 		showToast("Erro ao usar o poder.", false)
@@ -716,7 +498,6 @@ local function activate(def)
 	if def.mode == "aim" then
 		if S.aiming == def.id then S.aiming = nil return end
 		if os.clock() < (S.cooldowns[def.id] or 0) then return showToast("Em recarga.", false) end
-		if os.clock() < S.exhaustedUntil then return showToast("Você está esgotado.", false) end
 		setAim(def.id)
 	else
 		local ok, err = pcall(Powers[def.id])
@@ -728,16 +509,7 @@ local function activate(def)
 end
 
 for i, def in ipairs(ORDER) do
-	local p = Config.Powers[def.id]
-	local infoText
-	if def.id == "mark" then
-		infoText = string.format("%dE · fixa aqui", p.cost)
-	elseif def.id == "recall" then
-		infoText = "SEM MARCA"
-	else
-		infoText = string.format("ALC %d · %dE", math.floor(p.range), p.cost)
-	end
-	makeButton(def.id, def.label, i, infoText, function() activate(def) end)
+	makeButton(def.id, def.label, i, def.info, function() activate(def) end)
 end
 
 ------------------------------------------------------------------
@@ -745,48 +517,26 @@ end
 ------------------------------------------------------------------
 local function refreshUI()
 	local t = os.clock()
-	local exhaustLeft = math.max(0, S.exhaustedUntil - t)
-	local frac = math.clamp(S.energy / Config.MaxEnergy, 0, 1)
-
-	energyFill.Size = UDim2.new(frac, 0, 1, 0)
-	if exhaustLeft > 0 then
-		energyFill.BackgroundColor3 = THEME.danger
-		energyText.Text = string.format("ESGOTADO  %ds", math.ceil(exhaustLeft))
-	else
-		energyFill.BackgroundColor3 = frac < 0.25 and THEME.warn or THEME.accent
-		energyText.Text = string.format("ENERGIA  %d/%d", math.floor(S.energy + 0.5), Config.MaxEnergy)
-	end
-
-	local hrp = getHrp()
 	for _, def in ipairs(ORDER) do
 		local p = Config.Powers[def.id]
 		local ui = buttons[def.id]
 		local remain = math.max(0, (S.cooldowns[def.id] or 0) - t)
-		local cost = p.cost
-		local hasMark = S.mark ~= nil
 
 		if def.id == "recall" then
-			if hasMark and hrp then
-				local d = (S.mark.pos - hrp.Position).Magnitude
-				cost = p.cost + d * Config.RecallCostPerStud
-				ui.info.Text = string.format("MARCA %dst · %dE", math.floor(d), math.ceil(cost))
+			local hrp = getHrp()
+			if S.mark and hrp then
+				ui.info.Text = string.format("MARCA A %d studs", math.floor((S.mark - hrp.Position).Magnitude))
 			else
 				ui.info.Text = "SEM MARCA"
 			end
-		elseif p.range then
-			ui.info.Text = string.format("ALC %d · %dE", math.floor(effectiveRange(def.id)), p.cost)
 		end
 
 		local text, color
-		if exhaustLeft > 0 then
-			text, color = "ESGOTADO", THEME.danger
-		elseif remain > 0 then
+		if remain > 0 then
 			text, color = string.format("RECARGA %.1fs", remain), THEME.warn
-		elseif S.energy < cost then
-			text, color = "SEM ENERGIA", THEME.danger
 		elseif S.aiming == def.id then
 			text, color = "MIRE: TOQUE", THEME.accent
-		elseif def.id == "recall" and not hasMark then
+		elseif def.id == "recall" and not S.mark then
 			text, color = "SEM MARCA", THEME.dim
 		else
 			text, color = "PRONTO", THEME.accent
@@ -799,35 +549,10 @@ local function refreshUI()
 	end
 end
 
-------------------------------------------------------------------
--- LOOPS
-------------------------------------------------------------------
 local uiAcc = 0
 RunService.Heartbeat:Connect(function(dt)
-	local t = os.clock()
-
-	-- energia e esgotamento
-	if t >= S.exhaustedUntil then
-		if S.wasExhausted then
-			S.wasExhausted = false
-			S.fatigue = 0
-			showToast("Energia espacial estabilizada.", true)
-		end
-		if t - S.lastUse >= Config.RegenDelay then
-			S.energy = math.min(Config.MaxEnergy, S.energy + Config.RegenPerSecond * dt)
-		end
-		S.fatigue = math.max(0, S.fatigue - Config.FatigueDecay * dt)
-	end
-
-	-- marcação expira
-	if S.mark and t - S.mark.time > Config.MarkLifetime then
-		S.mark = nil
-		updateBeacon()
-		showToast("A marcação espacial se dissipou.", false)
-	end
-
 	updatePortal()
-
+	if S.aiming and os.clock() > S.aimDeadline then S.aiming = nil end
 	uiAcc += dt
 	if uiAcc >= 0.08 then
 		uiAcc = 0
@@ -836,26 +561,13 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 RunService.RenderStepped:Connect(function()
-	if S.aiming then
-		local hrp = getHrp()
-		if hrp then
-			local r = effectiveRange(S.aiming) or 10
-			ring.Size = Vector3.new(0.2, r * 2, r * 2)
-			ring.CFrame = CFrame.new(hrp.Position - Vector3.new(0, hrpOffset() - 0.1, 0))
-				* CFrame.Angles(0, 0, math.pi / 2)
-			ring.Parent = Workspace
-		end
-		if os.clock() > S.aimDeadline then S.aiming = nil end
-	else
-		ring.Parent = nil
-	end
 	if beacon.Parent then
 		beacon.Transparency = 0.45 + 0.2 * math.sin(os.clock() * 3)
 	end
 end)
 
 ------------------------------------------------------------------
--- ENTRADA: toque no mundo, teclas, arrastar painel
+-- ENTRADA: toque no mundo, teclas, arrastar
 ------------------------------------------------------------------
 local tapStarts = {}
 
@@ -896,18 +608,21 @@ local function clampToScreen(obj)
 	end
 end
 
-local function makeDraggable(handle, target)
-	local dragging, dragStart, startPos = false, nil, nil
+-- Arrastável; se soltar sem ter arrastado, conta como toque (onTap).
+local function makeDraggable(handle, target, onTap)
+	local dragging, moved, dragStart, startPos = false, false, nil, nil
 	handle.InputBegan:Connect(function(input)
 		local kind = input.UserInputType
 		if kind == Enum.UserInputType.MouseButton1 or kind == Enum.UserInputType.Touch then
 			dragging = true
+			moved = false
 			dragStart = input.Position
 			startPos = target.Position
 			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 					clampToScreen(target)
+					if not moved and onTap then onTap() end
 				end
 			end)
 		end
@@ -917,15 +632,17 @@ local function makeDraggable(handle, target)
 		local kind = input.UserInputType
 		if kind == Enum.UserInputType.MouseMovement or kind == Enum.UserInputType.Touch then
 			local delta = input.Position - dragStart
-			target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
-				startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			if delta.Magnitude > 8 then moved = true end
+			if moved then
+				target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+					startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			end
 		end
 	end)
 end
 
-makeDraggable(header, panel)
-
-toggleBtn.Activated:Connect(function()
+makeDraggable(header, panel, nil)
+makeDraggable(toggleBtn, toggleBtn, function()
 	panel.Visible = not panel.Visible
 	if not panel.Visible then S.aiming = nil end
 end)
@@ -935,15 +652,11 @@ local function applyScale()
 	if vp.X <= 0 or vp.Y <= 0 then return end
 	uiScale.Scale = math.clamp(math.min(vp.Y / (PANEL_H + 30), vp.X / (PANEL_W + 110)), 0.65, 1)
 	clampToScreen(panel)
+	clampToScreen(toggleBtn)
 end
 gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(applyScale)
 task.defer(applyScale)
 
--- Ao renascer: energia cheia, sem esgotamento
 player.CharacterAdded:Connect(function()
-	S.energy = Config.MaxEnergy
-	S.fatigue = 0
-	S.exhaustedUntil = 0
-	S.wasExhausted = false
 	S.aiming = nil
 end)
